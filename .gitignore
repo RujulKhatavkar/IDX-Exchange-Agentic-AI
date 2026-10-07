@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# MLS data: never commit raw or derived data
+data/
+*.sql
+*.csv
+*.sql.gz
+skills/*/cities.txt
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# macOS
+.DS_Store
