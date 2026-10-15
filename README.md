@@ -10,6 +10,7 @@ A multi agent real estate assistant built on [OpenClaw](https://github.com/openc
 | 1 | Architecture (see `docs/`) | Done |
 | 2 | Natural language property search parser | Done |
 | 3 | MySQL query layer | Done |
+| 4 | Conversational multi-turn search | Done |
 
 ## Repository layout
 
@@ -64,6 +65,31 @@ search is a full table scan over 500k+ rows:
 ```bash
 mysql -u root -p idx_exchange < db/indexes.sql
 ```
+
+## Week 4: multi-turn conversation
+
+The handbook's Week 4 design is a long-running Node process holding a `Map<string,
+UserSession>` per WhatsApp user. That doesn't fit here: `search_properties.py` runs fresh per
+message (no persistent process to hold a map in), and OpenClaw's agent is a conversational LLM
+that already has the full chat history in context - it doesn't need an external store to
+remember what the user said two messages ago.
+
+So instead: `merge_filters(known, new)` in `parse_query.py` is a pure function that layers a
+new turn's parsed filters onto whatever was already established, and the calling agent (per
+`SKILL.md`) is responsible for holding the filters JSON and passing it back in via `--known`
+each turn:
+
+```bash
+python3 skills/idx-property-search/search_properties.py search "Find homes in Irvine"
+# => filters: {"city": "Irvine"}
+python3 skills/idx-property-search/search_properties.py search "under \$1.2M" --known '{"city":"Irvine"}'
+# => filters: {"city": "Irvine", "maxPrice": 1200000}
+python3 skills/idx-property-search/search_properties.py search "single family with at least 3 beds" --known '{"city":"Irvine","maxPrice":1200000}'
+# => filters: {"city": "Irvine", "maxPrice": 1200000, "type": "SingleFamilyResidence", "beds": 3}
+```
+
+A new message's values always override `--known` on the same key (how a correction like
+"actually 4 beds" takes effect); keys it doesn't mention carry forward unchanged.
 
 ## Setup
 

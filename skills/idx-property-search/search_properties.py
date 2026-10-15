@@ -2,12 +2,19 @@
 """Query rets_property (active listings) and california_sold (sold comps).
 
 Usage:
-    python3 search_properties.py search "<free text query>" [--page N] [--limit N]
+    python3 search_properties.py search "<free text query>" [--page N] [--limit N] [--known '<json>']
     python3 search_properties.py comps --city "Irvine" [--months N]
 
 Prints one line of JSON:
     search -> {"filters": {...}, "page": N, "limit": N, "count": N, "results": [...]}
     comps  -> {"city": "...", "months": N, "count": N, "results": [...]}
+
+--known carries a multi-turn conversation's filters forward: pass the
+previous call's "filters" output back in on the next turn, and whatever
+the new <query> mentions overrides it (merge_filters in parse_query.py).
+There is no server-side session store - the calling agent already has the
+whole conversation in context, so it is the one responsible for holding
+onto and re-sending the filters JSON turn to turn.
 
 The query builders (build_active_listing_query, build_sold_comps_query) are
 pure functions - no DB access - so they're unit tested directly without a
@@ -23,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from db import run_query  # noqa: E402
-from parse_query import parse_property_query  # noqa: E402
+from parse_query import merge_filters, parse_property_query  # noqa: E402
 
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 10
@@ -134,6 +141,11 @@ def main() -> None:
     search.add_argument("query")
     search.add_argument("--page", type=int, default=1)
     search.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    search.add_argument(
+        "--known",
+        help="JSON object of filters already established earlier in this conversation "
+        "(the previous call's 'filters' output). New values in <query> override these.",
+    )
 
     comps = sub.add_parser("comps", help="Sold comps for a city")
     comps.add_argument("--city", required=True)
@@ -142,7 +154,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "search":
-        filters = parse_property_query(args.query)
+        new_filters = parse_property_query(args.query)
+        filters = merge_filters(json.loads(args.known), new_filters) if args.known else new_filters
         results = search_active_listings(filters, args.page, args.limit)
         output = {
             "filters": {k: v for k, v in filters.items() if v is not None},

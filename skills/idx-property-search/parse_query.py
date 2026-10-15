@@ -162,6 +162,23 @@ def parse_property_query(query: str, cities: list[str] | None = None) -> dict:
     return out
 
 
+def merge_filters(known: dict, new: dict) -> dict:
+    """Merge a new turn's parsed filters onto filters already known from
+    earlier in the conversation.
+
+    Any key the new message mentions (non-None) overrides the known value -
+    this is how a correction like "actually 4 beds" takes effect on the next
+    turn. Keys the new message doesn't mention keep whatever was already
+    known, which is also what makes a filters-only follow-up like "show me
+    more" (parsed from empty/unrelated text) a no-op merge.
+    """
+    merged = dict(known)
+    for key, value in new.items():
+        if value is not None:
+            merged[key] = value
+    return merged
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print('usage: parse_query.py "<query>"', file=sys.stderr)

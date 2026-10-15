@@ -5,7 +5,7 @@ import pytest
 
 # Test the copy in this repo: skills/idx-property-search
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "idx-property-search"))
-from parse_query import parse_property_query  # noqa: E402
+from parse_query import merge_filters, parse_property_query  # noqa: E402
 
 # Small stand in for cities.txt so tests run without the database.
 CITIES = ["Irvine", "Newport Beach", "Newport", "San Diego", "Pasadena", "Riverside", "Los Angeles", "Big Bear"]
@@ -87,3 +87,49 @@ def test_known_cities(query, expected):
 )
 def test_city_fallback_without_list(query, city):
     assert parse_property_query(query, cities=[])["city"] == city
+
+
+# merge_filters: multi-turn conversation memory (Week 4). Each turn's new
+# message is parsed alone, so merge_filters is what layers it onto what was
+# already established - there's no in-process session store since the
+# calling agent already holds the conversation and passes "known" back in.
+
+
+def test_merge_new_values_onto_unrelated_known_values():
+    known = {"city": "Irvine", "maxPrice": 1_500_000, "beds": None, "type": None}
+    new = {"city": None, "maxPrice": None, "beds": 3, "type": "SingleFamilyResidence"}
+    merged = merge_filters(known, new)
+    assert merged == {"city": "Irvine", "maxPrice": 1_500_000, "beds": 3, "type": "SingleFamilyResidence"}
+
+
+def test_merge_correction_overrides_known_value():
+    # "actually 4 beds" after "3 bed homes in Irvine" - new wins on the shared key.
+    known = {"city": "Irvine", "beds": 3}
+    new = {"city": None, "beds": 4}
+    assert merge_filters(known, new) == {"city": "Irvine", "beds": 4}
+
+
+def test_merge_all_none_new_is_a_no_op():
+    # "show me more" parses to all-None filters; known state must survive untouched.
+    known = {"city": "Irvine", "beds": 3, "maxPrice": 1_500_000}
+    new = {"city": None, "beds": None, "maxPrice": None}
+    assert merge_filters(known, new) == known
+
+
+def test_merge_from_empty_known_is_just_new():
+    # merge_filters only copies non-None keys, so compare against the same
+    # filtered view the CLI itself prints (absent vs. None is equivalent to
+    # every downstream .get() lookup).
+    new = parse_property_query("3 bed condos in Irvine under $1.5M", cities=CITIES)
+    non_none = {k: v for k, v in new.items() if v is not None}
+    assert merge_filters({}, new) == non_none
+
+
+def test_merge_across_real_turns():
+    turn1 = parse_property_query("Find homes in Irvine", cities=CITIES)
+    turn2 = merge_filters(turn1, parse_property_query("under $1.2M", cities=CITIES))
+    turn3 = merge_filters(turn2, parse_property_query("single family with at least 3 beds", cities=CITIES))
+    assert turn3["city"] == "Irvine"
+    assert turn3["maxPrice"] == 1_200_000
+    assert turn3["type"] == "SingleFamilyResidence"
+    assert turn3["beds"] == 3
