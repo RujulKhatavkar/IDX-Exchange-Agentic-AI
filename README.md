@@ -9,18 +9,23 @@ A multi agent real estate assistant built on [OpenClaw](https://github.com/openc
 | 0 | Environment setup: OpenClaw, MySQL import | Done |
 | 1 | Architecture (see `docs/`) | Done |
 | 2 | Natural language property search parser | Done |
-| 3 | MySQL query layer | Next |
+| 3 | MySQL query layer | Done |
 
 ## Repository layout
 
 ```
+db/
+  indexes.sql           Secondary + FULLTEXT indexes missing from the source dumps
 skills/
   idx-property-search/
-    SKILL.md          OpenClaw skill: when and how the agent uses the parser
-    parse_query.py    Free text query -> structured rets_property filters
+    SKILL.md            OpenClaw skill: when and how the agent searches
+    parse_query.py      Free text query -> structured rets_property filters
+    search_properties.py  Filters -> parameterized SQL -> rets_property / california_sold
+    db.py               Connection pool + query execution
 tests/
-  test_parse_query.py 17 test queries
-docs/                 Architecture notes
+  test_parse_query.py      17 parser test queries
+  test_search_properties.py  Query-builder tests (SQL shape, params, pagination, limit clamp)
+docs/                   Architecture notes
 ```
 
 ## Week 2: query parser
@@ -37,6 +42,27 @@ City matching uses `cities.txt`, exported from the database and kept out of the 
 
 ```bash
 mysql -u root -p idx_exchange -N -e "SELECT DISTINCT L_City FROM rets_property WHERE L_City <> '' ORDER BY L_City;" > skills/idx-property-search/cities.txt
+```
+
+## Week 3: MySQL query layer
+
+`search_properties.py` turns parser filters into a parameterized SQL query and runs it:
+
+```bash
+python3 skills/idx-property-search/search_properties.py search "3 bed condos in Irvine under $1.5M with a pool" --page 1 --limit 10
+python3 skills/idx-property-search/search_properties.py comps --city "Irvine" --months 12
+```
+
+Both query builders (`build_active_listing_query`, `build_sold_comps_query`) are plain
+functions with no DB access, so they're unit tested directly - no live database needed to
+run `pytest`. Results are capped at 50 rows per query.
+
+The source SQL dumps (`rets_property.sql`, `california_sold.sql`) define no indexes at all -
+not even a primary key - so run `db/indexes.sql` once after importing both tables, or every
+search is a full table scan over 500k+ rows:
+
+```bash
+mysql -u root -p idx_exchange < db/indexes.sql
 ```
 
 ## Setup

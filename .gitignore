@@ -6,6 +6,7 @@
 # MLS data: never commit raw or derived data
 data/
 *.sql
+!db/*.sql
 *.csv
 *.sql.gz
 skills/*/cities.txt
