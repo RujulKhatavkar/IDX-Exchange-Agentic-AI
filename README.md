@@ -11,6 +11,7 @@ A multi agent real estate assistant built on [OpenClaw](https://github.com/openc
 | 2 | Natural language property search parser | Done |
 | 3 | MySQL query layer | Done |
 | 4 | Conversational multi-turn search | Done |
+| 5 | Market statistics agent | Done |
 
 ## Repository layout
 
@@ -23,9 +24,13 @@ skills/
     parse_query.py      Free text query -> structured rets_property filters
     search_properties.py  Filters -> parameterized SQL -> rets_property / california_sold
     db.py               Connection pool + query execution
+  idx-market-stats/
+    SKILL.md            OpenClaw skill: when and how the agent answers market questions
+    market_stats.py     california_sold -> city summary, monthly trend, market reading
 tests/
   test_parse_query.py      17 parser test queries
   test_search_properties.py  Query-builder tests (SQL shape, params, pagination, limit clamp)
+  test_market_stats.py     Market query builders, partial months, period change, reading labels
 docs/                   Architecture notes
 ```
 
@@ -91,6 +96,40 @@ python3 skills/idx-property-search/search_properties.py search "single family wi
 A new message's values always override `--known` on the same key (how a correction like
 "actually 4 beds" takes effect); keys it doesn't mention carry forward unchanged.
 
+## Week 5: market statistics
+
+A second skill, `idx-market-stats`, answers market questions ("Is now a good time to buy in
+San Diego?") from `california_sold`. One command returns everything the agent needs:
+
+```bash
+python3 skills/idx-market-stats/market_stats.py overview --city "Los Angeles" [--zip 90026] [--type Condominium]
+```
+
+- `summary`: sold count, median and average close price, price per sq ft, days on market,
+  list-to-close ratio over the last 12 months.
+- `trend`: the same per month, with month-over-month change.
+- `change_over_period`: first full month vs. last full month.
+- `reading`: those numbers turned into fixed labels (price direction, speed, negotiation room,
+  seller-/buyer-leaning/balanced) plus a one-sentence `headline` the agent quotes.
+
+Where this differs from the handbook, and why:
+
+- **Median** - MySQL has no `MEDIAN()`, so the queries rank sales with `ROW_NUMBER()` and
+  average the middle one or two rows. Checked against Python's `statistics.median`.
+- **No pandas** - the handbook computes `pct_change` with pandas; here it's a few lines of
+  Python, so the OpenClaw gateway's Python doesn't need pandas installed.
+- **Bad dates** - a few sales have typo'd future close dates (2028, 2030, 2072), so every
+  window has an upper bound of today, not just a lower one.
+- **Partial months** - the dump covers 18 Mar to 17 Sep 2026, so those months have about half
+  the sales days of the rest. `days_covered` flags them as `partial`, and the period change
+  skips them; otherwise September's half month reads as a price drop. With six months of
+  data, year-over-year comparisons aren't possible.
+- **The reading is computed, not prompted** - with thresholds only written in `SKILL.md`, a
+  small model (gpt-oss-20b) skipped the trend, invented comparisons ("higher than the state
+  average"), and called a 28-day, 99.5%-of-asking market "buyer-friendly". `market_reading()`
+  applies the thresholds in code, `summary` carries the reading too, and `SKILL.md` tells the
+  agent to quote the headline and never contradict it.
+
 ## Setup
 
 Requires Node 24.16+ (for OpenClaw), Python 3.10+, and MySQL 8.4.
@@ -102,11 +141,24 @@ pip install -r requirements.txt
 python3 -m pytest tests/ -v
 ```
 
-Link the skill into OpenClaw so edits in this repo apply directly:
+Link the skills into OpenClaw so edits in this repo apply directly:
 
 ```bash
 ln -s "$PWD/skills/idx-property-search" ~/.openclaw/skills/idx-property-search
+ln -s "$PWD/skills/idx-market-stats" ~/.openclaw/skills/idx-market-stats
 openclaw gateway restart
+```
+
+The gateway runs the skills with whatever `python3` is first on its own PATH (on macOS with
+Homebrew, `/opt/homebrew/bin/python3`), not this repo's venv - that Python needs
+`mysql-connector-python` too.
+
+Give each WhatsApp chat its own session. By default, DMs share the agent's main session, which
+`/new` can't reset, so old answers pile up and the agent repeats them instead of re-running
+the skills:
+
+```bash
+openclaw config set session.dmScope per-channel-peer
 ```
 
 ## Data
