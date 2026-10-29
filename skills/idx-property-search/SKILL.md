@@ -1,6 +1,6 @@
 ---
 name: idx-property-search
-description: Search active MLS listings (rets_property) and sold comps (california_sold) from a free text request - city, price, beds, baths, sq ft, property type, pool, view, HOA. Use whenever the user asks to find, search for, or show properties, listings, or recent sales/comps.
+description: Search active MLS listings (rets_property) and sold comps (california_sold) from a free text request - city, price, beds, baths, sq ft, property type, pool, view, HOA. Use whenever the user asks to find, search for, or show properties, listings, or recent sales/comps. If the user describes a style, feel or setting in words ("charming craftsman", "mountain views", "quiet cul-de-sac"), use idx-semantic-search instead.
 metadata: {"openclaw": {"requires": {"bins": ["python3"]}}}
 ---
 

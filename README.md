@@ -12,6 +12,7 @@ A multi agent real estate assistant built on [OpenClaw](https://github.com/openc
 | 3 | MySQL query layer | Done |
 | 4 | Conversational multi-turn search | Done |
 | 5 | Market statistics agent | Done |
+| 6 | Embeddings and semantic search | Done |
 
 ## Repository layout
 
@@ -27,10 +28,16 @@ skills/
   idx-market-stats/
     SKILL.md            OpenClaw skill: when and how the agent answers market questions
     market_stats.py     california_sold -> city summary, monthly trend, market reading
+  idx-semantic-search/
+    SKILL.md            OpenClaw skill: when and how the agent searches by description
+    nvidia_embed.py     NVIDIA embeddings API client (standard library only)
+    embed_listings.py   One-time job: listing descriptions -> data/embeddings/ vector index
+    semantic_search.py  Hard filters in SQL, then rank by meaning (cosine similarity)
 tests/
   test_parse_query.py      17 parser test queries
   test_search_properties.py  Query-builder tests (SQL shape, params, pagination, limit clamp)
   test_market_stats.py     Market query builders, partial months, period change, reading labels
+  test_semantic_search.py  Embedding request/text, filters, scoring, duplicate handling
 docs/                   Architecture notes
 ```
 
@@ -130,6 +137,55 @@ Where this differs from the handbook, and why:
   applies the thresholds in code, `summary` carries the reading too, and `SKILL.md` tells the
   agent to quote the headline and never contradict it.
 
+## Week 6: embeddings and semantic search
+
+A third skill, `idx-semantic-search`, finds listings by what they're *like* rather than by
+numbers alone: *"charming craftsman with mountain views"*, *"quiet cul-de-sac near good
+schools"*.
+
+**Build the index once** (about 45 minutes for 54,891 active listings with a description):
+
+```bash
+python3 skills/idx-semantic-search/embed_listings.py --dry-run   # preview the text for 2 listings
+python3 skills/idx-semantic-search/embed_listings.py             # build, or resume after an interruption
+```
+
+Each listing becomes one text - type, city, beds, baths, sq ft, year, price, then the
+agent's description - embedded with NVIDIA's `nvidia/nemotron-3.5-embed-1b` (2048
+dimensions). Vectors are saved as float16 in `data/embeddings/` (about 214 MB, gitignored:
+it's derived MLS data). The job saves every 1,024 listings, so a rate limit or a closed laptop
+lid only loses the current chunk.
+
+**Search:**
+
+```bash
+python3 skills/idx-semantic-search/semantic_search.py search "charming craftsman in Pasadena under \$1.5M"
+```
+
+1. The Week 2 parser pulls out hard facts (city, price, beds, pool, view...) and they're
+   applied as SQL filters, using the same column mapping as Week 3.
+2. The request is embedded (`input_type: "query"`; listings use `"passage"`).
+3. Remaining listings are ranked by cosine similarity - a dot product, since the vectors are
+   unit length.
+4. The top 5 come back with listing details and the start of the description, so the agent
+   can quote why each one matched.
+
+About 0.6 s per search once the index is in memory.
+
+Where this differs from the handbook, and why:
+
+- **NVIDIA instead of OpenAI embeddings** - free tier, and the chat model already runs on
+  NVIDIA, so one key covers both.
+- **A NumPy file instead of a vector database** - 55k vectors fit in memory and score in
+  0.2 s, so a vector DB would add a service to run without making search noticeably faster.
+- **Hybrid, not pure vector** - "under $1.5M" or "in Pasadena" must be exact, which
+  similarity can't guarantee, so hard facts are SQL filters and only the rest is matched by
+  meaning.
+- **"near good schools" isn't a city** - the Week 2 parser reads "near X" as a city, which
+  would match nothing. A city is only used as a filter if it's in `cities.txt`.
+- **Duplicates** - `rets_property` has 3 listings stored twice; results skip repeats so one
+  home can't take two of the top 5 spots.
+
 ## Setup
 
 Requires Node 24.16+ (for OpenClaw), Python 3.10+, and MySQL 8.4.
@@ -146,12 +202,20 @@ Link the skills into OpenClaw so edits in this repo apply directly:
 ```bash
 ln -s "$PWD/skills/idx-property-search" ~/.openclaw/skills/idx-property-search
 ln -s "$PWD/skills/idx-market-stats" ~/.openclaw/skills/idx-market-stats
+ln -s "$PWD/skills/idx-semantic-search" ~/.openclaw/skills/idx-semantic-search
 openclaw gateway restart
 ```
 
 The gateway runs the skills with whatever `python3` is first on its own PATH (on macOS with
 Homebrew, `/opt/homebrew/bin/python3`), not this repo's venv - that Python needs
-`mysql-connector-python` too.
+`mysql-connector-python` and `numpy` too:
+
+```bash
+/opt/homebrew/bin/python3 -m pip install --user --break-system-packages mysql-connector-python numpy
+```
+
+Semantic search needs `NVIDIA_API_KEY` (an `nvapi-...` key from build.nvidia.com) in `.env`,
+and the index built as described in Week 6.
 
 Give each WhatsApp chat its own session. By default, DMs share the agent's main session, which
 `/new` can't reset, so old answers pile up and the agent repeats them instead of re-running
