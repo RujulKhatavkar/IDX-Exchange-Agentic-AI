@@ -13,6 +13,7 @@ A multi agent real estate assistant built on [OpenClaw](https://github.com/openc
 | 4 | Conversational multi-turn search | Done |
 | 5 | Market statistics agent | Done |
 | 6 | Embeddings and semantic search | Done |
+| 7 | Recommendation engine with comp validation | Done |
 
 ## Repository layout
 
@@ -33,11 +34,16 @@ skills/
     nvidia_embed.py     NVIDIA embeddings API client (standard library only)
     embed_listings.py   One-time job: listing descriptions -> data/embeddings/ vector index
     semantic_search.py  Hard filters in SQL, then rank by meaning (cosine similarity)
+  idx-recommendations/
+    SKILL.md            OpenClaw skill: homes similar to one listing, with a price check
+    recommend.py        Hybrid score (price, beds, city, sq ft + description similarity)
+    comps.py            Asking price vs median $/sq ft of recent sold comps
 tests/
   test_parse_query.py      17 parser test queries
   test_search_properties.py  Query-builder tests (SQL shape, params, pagination, limit clamp)
   test_market_stats.py     Market query builders, partial months, period change, reading labels
   test_semantic_search.py  Embedding request/text, filters, scoring, duplicate handling
+  test_recommendations.py  Target lookup, score tiers, ranking, comp window, price verdicts
 docs/                   Architecture notes
 ```
 
@@ -186,6 +192,49 @@ Where this differs from the handbook, and why:
 - **Duplicates** - `rets_property` has 3 listings stored twice; results skip repeats so one
   home can't take two of the top 5 spots.
 
+## Week 7: recommendations with comp validation
+
+A fourth skill, `idx-recommendations`, answers *"show me homes like 380 Dearborn Street"* or
+*"more like the second one"*, and checks each home's asking price against recent sales.
+
+```bash
+python3 skills/idx-recommendations/recommend.py similar "380 Dearborn" --city Pasadena
+```
+
+**Similarity** - every other active listing of the same type gets the handbook's hybrid
+score, out of 100:
+
+| Part | Points |
+| --- | --- |
+| Price | 20 / 12 / 5 within $50k / $150k / $300k |
+| Beds | 15 if the same |
+| City | 15 if the same |
+| Sq ft | 10 / 5 within 300 / 700 |
+| Description | cosine similarity x 40, from the Week 6 index |
+
+All ~55k candidates are scored at once with NumPy, and the description part is a lookup in
+the Week 6 vectors (no API call), so a recommendation takes about 0.6 s.
+
+**Price check** (`comps.py`) - comps are `california_sold` sales in the same city, of the same
+property type, within 20% of the home's sq ft, over the 6 months up to the latest recorded
+sale. The comp price is the median sold $/sq ft x the home's sq ft, and the verdict is fixed
+text the agent quotes: *"priced 14.0% below recent comps"*, *"in line with recent comps"*
+(within 5%), or *"not enough recent comps to judge the price"* (fewer than 3).
+
+Where this differs from the handbook, and why:
+
+- **Median, not average, $/sq ft** - a few very expensive sales pull the average up 3-9%,
+  enough to flip a verdict.
+- **Same property type** - in Pasadena half the size-matched comps for a house were condos,
+  which sell at a different $/sq ft.
+- **The window ends at the latest sale, not today** - the sold data stops at a fixed date, so
+  "the last 6 months" would shrink every day. It still never goes past today, so typo'd future
+  close dates are excluded.
+- **The verdict is worded in code** - so the agent quotes it rather than doing arithmetic
+  (the Week 5 lesson).
+- **Ambiguous addresses** - "Main Street" matches many listings, so the skill returns the
+  matches and the agent asks which one.
+
 ## Setup
 
 Requires Node 24.16+ (for OpenClaw), Python 3.10+, and MySQL 8.4.
@@ -203,6 +252,7 @@ Link the skills into OpenClaw so edits in this repo apply directly:
 ln -s "$PWD/skills/idx-property-search" ~/.openclaw/skills/idx-property-search
 ln -s "$PWD/skills/idx-market-stats" ~/.openclaw/skills/idx-market-stats
 ln -s "$PWD/skills/idx-semantic-search" ~/.openclaw/skills/idx-semantic-search
+ln -s "$PWD/skills/idx-recommendations" ~/.openclaw/skills/idx-recommendations
 openclaw gateway restart
 ```
 
@@ -215,7 +265,7 @@ Homebrew, `/opt/homebrew/bin/python3`), not this repo's venv - that Python needs
 ```
 
 Semantic search needs `NVIDIA_API_KEY` (an `nvapi-...` key from build.nvidia.com) in `.env`,
-and the index built as described in Week 6.
+and the index built as described in Week 6. Recommendations use the same index.
 
 Give each WhatsApp chat its own session. By default, DMs share the agent's main session, which
 `/new` can't reset, so old answers pile up and the agent repeats them instead of re-running

@@ -1,6 +1,6 @@
 ---
 name: idx-semantic-search
-description: Find active listings by meaning - style, feel, character, setting or features described in words, like "charming craftsman with mountain views", "modern home with an open floor plan", "quiet cul-de-sac near good schools", "cozy cabin by the lake". Use whenever the user describes the kind of home they want rather than only numbers. For plain filter searches (city, price, beds, baths) use idx-property-search; for market questions use idx-market-stats.
+description: Find active listings by meaning - style, feel, character, setting or features described in words, like "charming craftsman with mountain views", "modern home with an open floor plan", "quiet cul-de-sac near good schools", "cozy cabin by the lake". Use whenever the user describes the kind of home they want rather than only numbers. For plain filter searches (city, price, beds, baths) use idx-property-search; for market questions use idx-market-stats; for homes similar to one specific listing use idx-recommendations.
 metadata: {"openclaw": {"requires": {"bins": ["python3"]}}}
 ---
 
