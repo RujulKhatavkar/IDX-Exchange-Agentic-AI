@@ -82,8 +82,10 @@ def test_search_never_exceeds_max_limit():
 
 def test_sold_comps_query_shape_and_params():
     sql, params = build_sold_comps_query("Pasadena", months=6, limit=25)
-    assert sql.count("%s") == len(params) == 3
-    city, cutoff, limit = params
+    assert sql.count("%s") == len(params) == 4
+    city, cutoff, upper, limit = params
+    assert "CloseDate <= %s" in sql
+    assert upper == date.today().isoformat()
     assert city == "Pasadena"
     assert limit == 25
     # cutoff is an ISO date roughly `months` back, and not in the future

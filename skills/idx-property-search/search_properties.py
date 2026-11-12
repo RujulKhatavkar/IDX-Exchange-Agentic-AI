@@ -117,15 +117,16 @@ def build_sold_comps_query(city: str, months: int = 12, limit: int = MAX_LIMIT) 
     date arithmetic over a varchar.
     """
     limit = clamp_limit(limit)
-    cutoff = (date.today() - timedelta(days=months * 30)).isoformat()
+    today = date.today()
+    cutoff = (today - timedelta(days=months * 30)).isoformat()
     sql = f"""
         SELECT {SOLD_COMP_COLUMNS}
         FROM california_sold
-        WHERE City = %s AND PropertyType = 'Residential' AND CloseDate >= %s
+        WHERE City = %s AND PropertyType = 'Residential' AND CloseDate >= %s AND CloseDate <= %s
         ORDER BY CloseDate DESC
         LIMIT %s
     """
-    return sql, (city, cutoff, limit)
+    return sql, (city, cutoff, today.isoformat(), limit)
 
 
 def get_sold_comps(city: str, months: int = 12, limit: int = MAX_LIMIT) -> list[dict]:

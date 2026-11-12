@@ -14,6 +14,7 @@ A multi agent real estate assistant built on [OpenClaw](https://github.com/openc
 | 5 | Market statistics agent | Done |
 | 6 | Embeddings and semantic search | Done |
 | 7 | Recommendation engine with comp validation | Done |
+| 8 | Document RAG with cited evidence | Four-source retrieval validated; chat provider timeout blocks answer check |
 
 ## Repository layout
 
@@ -278,3 +279,36 @@ openclaw config set session.dmScope per-channel-peer
 ## Data
 
 MLS data is provided by IDX Exchange and is not included in this repository.
+
+## Week 8: document retrieval (in progress)
+
+`idx-rag` indexes reference PDFs and Week 5 JSON reports with the existing NVIDIA
+embedding model. Each passage retains its source path and PDF page. Retrieval returns
+cosine-ranked evidence with citation IDs; OpenClaw writes the answer from those passages
+using the grounding and abstention rules in `skills/idx-rag/SKILL.md`.
+
+Install the updated requirements in the Python environment used by the gateway. Keep
+source documents and generated indexes under gitignored `data/`. Build the corpus from
+the Real Estate Data Analyst Primer, Trestle Property MetaData, the handbook (for legacy
+IDX field mappings), and an actual Week 5 report:
+
+```bash
+mkdir -p data/rag
+python3 skills/idx-market-stats/market_stats.py overview --city Pasadena > data/rag/pasadena-market.json
+python3 skills/idx-rag/rag.py index \
+  ../Real_Estate_Data_Analys_Primer.pdf \
+  '../Trestle Property MetaData.pdf' \
+  ../AI_Agentic_Engineer_Intern_Handbook_2026_v2.pdf \
+  data/rag/pasadena-market.json
+python3 skills/idx-rag/rag.py retrieve 'What does DOM mean?'
+python3 skills/idx-rag/rag.py retrieve 'What columns are in california_sold?'
+python3 skills/idx-rag/rag.py retrieve 'What is a list-to-close ratio?'
+ln -s "$PWD/skills/idx-rag" ~/.openclaw/skills/idx-rag
+```
+
+Indexing sends extracted source text to NVIDIA, as with Week 6 descriptions. The index
+records its embedding model and rejects queries after a model change until rebuilt.
+The default minimum cosine score of 0.35 is provisional: validate it on the three sample
+questions and unrelated questions before relying on abstention. Similarity does not
+establish that a passage answers a question. Complete delivery requires the source index,
+a real Week 5 report, and end-to-end answer/citation checks in OpenClaw.
