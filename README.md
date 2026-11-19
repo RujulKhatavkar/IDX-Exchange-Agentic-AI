@@ -312,3 +312,39 @@ The default minimum cosine score of 0.35 is provisional: validate it on the thre
 questions and unrelated questions before relying on abstention. Similarity does not
 establish that a passage answers a question. Complete delivery requires the source index,
 a real Week 5 report, and end-to-end answer/citation checks in OpenClaw.
+
+## Week 9 - Multi-agent orchestration
+
+[`idx-coordinator`](skills/idx-coordinator/SKILL.md) is the OpenClaw entry point for
+IDX questions. OpenClaw classifies each turn in conversation context and builds a
+structured plan. The Python coordinator validates it, dispatches independent specialist
+calls concurrently, and returns one result per specialist. OpenClaw combines those
+results into one response or composes a reviewable email draft in chat.
+
+The entry point covers active, sold-comp and semantic search, market statistics,
+recommendations, source-grounded knowledge, and email drafts. Search refinements
+carry the previous filters within the current conversation. Recommendations can
+reuse a listing ID from that conversation. If a specialist fails, the other results
+are still available for the response.
+
+Install the coordinator alongside the existing skills:
+
+```bash
+ln -s "$PWD/skills/idx-coordinator" ~/.openclaw/skills/idx-coordinator
+openclaw skills info idx-coordinator
+```
+
+Ask OpenClaw to use `idx-coordinator`, for example, “Use idx-coordinator to find
+3-bedroom homes under $900k in Pasadena and tell me whether prices are rising.”
+For automatic routing on a dedicated IDX agent, set its OpenClaw skill allowlist
+to `["idx-coordinator"]`. The coordinator calls the existing Python tools by path,
+so the specialist skills do not need to be exposed to the model.
+
+The coordinator uses the repo's `venv/bin/python` for specialist tools when
+present. Otherwise it uses the Python running the coordinator, which must have
+the project dependencies. Smoke-test the mixed dispatch directly:
+
+```bash
+venv/bin/python skills/idx-coordinator/coordinator.py -- '[{"agent":"search","query":"3-bedroom homes under $900k in Pasadena","city":"Pasadena"},{"agent":"market","city":"Pasadena"}]'
+venv/bin/python -m pytest -q
+```
